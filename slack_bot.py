@@ -114,7 +114,7 @@ def process_message(state_key, user_input, say_func, thread_ts=None):
         if thread_ts:
             say_func(text=thinking_message, thread_ts=thread_ts)
         else:
-             say_func(text=thinking_message)
+            say_func(text=thinking_message)
 
         # Run API call in a separate thread to avoid blocking Slack event loop
         updated_history, should_end = None, False
@@ -131,17 +131,20 @@ def process_message(state_key, user_input, say_func, thread_ts=None):
         thread.join(timeout=300) # Wait for completion, adjust timeout as needed (Slack needs response < 3s for ack)
 
         if updated_history is None:
-             raise TimeoutError("Agent response timed out.")
-
+            raise TimeoutError("Agent response timed out.")
 
         current_state["history"] = updated_history # Update history in state
         
-        # Extract the latest assistant response(s) to send back
-        assistant_responses = [msg.get("content") for msg in updated_history if msg["role"] == "assistant" and msg.get("content")]
+        # Get only the most recent assistant response
+        assistant_responses = []
+        for msg in reversed(updated_history):
+            if msg["role"] == "assistant" and msg.get("content"):
+                assistant_responses = [msg.get("content")]
+                break
         response_text = "\n".join(assistant_responses).strip() if assistant_responses else "Sorry, I encountered an issue." # Default if no content
 
         if thread_ts:
-             say_func(text=response_text, thread_ts=thread_ts)
+            say_func(text=response_text, thread_ts=thread_ts)
         else:
             say_func(text=response_text)
 
