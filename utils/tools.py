@@ -85,3 +85,17 @@ def store_important_memory(memory: str) -> str:
         return f"Memory stored: {memory}"
     else:
         return f"Memory already exists: {memory}"
+
+def end_conversation(reason: str) -> str:
+    """
+    Call this tool when the user confirms that the primary task (finding the file path) is complete.
+    This signals that the conversation should end.
+    
+    Args:
+        reason (str): A brief explanation why the conversation is ending (e.g., "User confirmed file found.").
+    
+    Returns:
+        str: A confirmation message indicating the end signal was received.
+    """
+    print(f"Ending conversation because: {reason}") # Optional: Log the reason
+    return "Conversation end signal received."

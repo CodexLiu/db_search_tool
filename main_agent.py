@@ -93,16 +93,14 @@ def main():
     # Initial user message
     history.append({"role": "user", "content": user_prompt})
 
-    found = False # Track if the agent thinks it found the file
     max_turns = 25
     turn = 0
 
     while turn < max_turns: # Loop primarily based on turns
         # Use the new conversation handler function
         prev_len = len(history)
-        # handle_conversation returns the updated history and whether the *last* assistant message indicated finding the file
-        history, current_turn_found = handle_conversation(history, model=MODEL) 
-        found = current_turn_found # Update the overall found status
+        # handle_conversation returns the updated history and whether the *end_conversation* tool was called
+        history, should_end = handle_conversation(history, model=MODEL) 
         
         # Save conversation history immediately after the API call and processing
         save_conversation(history, session_id)
@@ -115,6 +113,11 @@ def main():
             if msg["role"] == "assistant" and msg.get("content") is not None:
                 print(f"{AGENT_COLOR}Agent: {msg.get('content', '')}{RESET_COLOR}")
         
+        # Check if the agent signaled to end the conversation
+        if should_end:
+            print(f"\n{SYSTEM_COLOR}Agent signaled conversation end.{RESET_COLOR}")
+            break
+
         # Check if max turns reached AFTER processing the turn using SYSTEM_COLOR
         if turn >= max_turns - 1:
             print(f"\n{SYSTEM_COLOR}Maximum conversation turns reached.{RESET_COLOR}")

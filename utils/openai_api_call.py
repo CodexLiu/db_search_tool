@@ -2,7 +2,7 @@ from openai import OpenAI
 import os
 from pathlib import Path
 import base64
-from utils.tools import check_file_contents, list_folder_contents, store_important_memory
+from utils.tools import check_file_contents, list_folder_contents, store_important_memory, end_conversation
 import json
 
 # Get the parent directory of the current file
@@ -63,6 +63,20 @@ tools = [
                 "required": ["memory"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "end_conversation",
+            "description": "Call this ONLY when the user confirms the task is complete to signal the end of the conversation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string", "description": "Brief reason for ending (e.g., 'User confirmed file found')."}
+                },
+                "required": ["reason"]
+            }
+        }
     }
 ]
 
@@ -110,12 +124,12 @@ def handle_conversation(history, model="gpt-4.1"):
         model (str): The model to use for the API calls.
 
     Returns:
-        tuple: (updated_history, is_found)
-            - updated_history: The history *after* this full turn (including all API calls, tool executions, and final response).
-            - is_found: Boolean indicating if the model expressed it found what was requested in the *final* assistant message of this turn.
+        tuple: (updated_history, should_end)
+            - updated_history: The history *after* this full turn.
+            - should_end: Boolean indicating if the `end_conversation` tool was called.
     """
     current_history = list(history) # Work on a copy
-    is_found = False
+    should_end = False # Flag to signal conversation end
 
     while True: # Loop to handle potential sequences of tool calls
         # Make the API call
@@ -145,7 +159,7 @@ def handle_conversation(history, model="gpt-4.1"):
                  if any(keyword in final_assistant_content.lower() for keyword in
                     ["found", "stop", "complete", "finished", "located", "discovered",
                      "identified", "here is the file", "the file is at", "i've found"]):
-                     is_found = True
+                     should_end = True
             break # Exit the while loop
 
         # --- Tool Call Execution --- 
@@ -169,6 +183,9 @@ def handle_conversation(history, model="gpt-4.1"):
                     tool_result = check_file_contents(**args)
                 elif tool_name == "store_important_memory":
                     tool_result = store_important_memory(**args)
+                elif tool_name == "end_conversation":
+                    tool_result = end_conversation(**args)
+                    should_end = True # Set the flag to end the conversation
                 else:
                     tool_result = f"Tool '{tool_name}' not implemented."
             except Exception as e:
@@ -187,5 +204,12 @@ def handle_conversation(history, model="gpt-4.1"):
         # loop back to call the API again with the tool results included.
         # The loop continues until the API responds without tool calls.
         
-    return current_history, is_found
+    # Check if end_conversation was the last action requested, even if there wasn't a final text response
+    if not should_end and msg.tool_calls:
+        for tc in msg.tool_calls:
+            if tc.function.name == "end_conversation":
+                should_end = True
+                break
+                
+    return current_history, should_end # Return the end flag
 
