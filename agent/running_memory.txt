@@ -25,3 +25,7 @@
 [2025-04-18 18:12:24] '/Amplifye (NEW)/Research & Development' contains a folder named 'SOP' which is likely to house the SOP template or SOP-related documents.
 [2025-04-18 18:12:28] The SOP template is located at '/Amplifye (NEW)/Research & Development/SOP/SOP-template.docx'. The 'SOP' folder under 'Research & Development' in the Amplifye (NEW) directory contains the template and finalized SOP documents.
 [2025-04-18 18:12:37] Successfully located the SOP template at '/Amplifye (NEW)/Research & Development/SOP/SOP-template.docx'. This is the directory for SOP templates and completed SOPs.
+[2025-04-18 19:34:05] '/Amplifye (NEW)' contains folders for key administrative functions such as Commercial, Regulatory, Legal, Research & Development, Employee Resources, Operations & Admin, Inventory, and more. This area is likely to house templates and administrative documents, including the SOP template.
+[2025-04-18 19:34:10] '/Amplifye (NEW)/Research & Development' contains folders: R&D Meetings, SOP, Product Development, KGK - Science GRAS package. The 'SOP' folder is a likely location for the SOP template.
+[2025-04-18 19:34:13] '/Amplifye (NEW)/Research & Development/SOP' contains the file 'SOP-template.docx' along with several finalized SOP documents. This is the likely location for the SOP template.
+[2025-04-18 19:34:41] Successfully located the SOP template at '/Amplifye (NEW)/Research & Development/SOP/SOP-template.docx'. This is the primary location for the SOP template and completed SOPs.
