@@ -1,0 +1,3 @@
+Amplifye (NEW) contains all newer files and most stuff relating to administration. 
+Kitchen sink is just a conglomeration of mostly RnD files. 
+Cody Liu is a user folder and does not need to be accessed.
