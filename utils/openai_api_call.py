@@ -154,12 +154,6 @@ def handle_conversation(history, model="gpt-4.1"):
 
         # If there are no tool calls, this turn is over.
         if not msg.tool_calls:
-            final_assistant_content = assistant_message.get("content", "") or ""
-            if final_assistant_content:
-                 if any(keyword in final_assistant_content.lower() for keyword in
-                    ["found", "stop", "complete", "finished", "located", "discovered",
-                     "identified", "here is the file", "the file is at", "i've found"]):
-                     should_end = True
             break # Exit the while loop
 
         # --- Tool Call Execution --- 
@@ -204,12 +198,5 @@ def handle_conversation(history, model="gpt-4.1"):
         # loop back to call the API again with the tool results included.
         # The loop continues until the API responds without tool calls.
         
-    # Check if end_conversation was the last action requested, even if there wasn't a final text response
-    if not should_end and msg.tool_calls:
-        for tc in msg.tool_calls:
-            if tc.function.name == "end_conversation":
-                should_end = True
-                break
-                
     return current_history, should_end # Return the end flag
 

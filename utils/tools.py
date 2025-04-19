@@ -88,11 +88,12 @@ def store_important_memory(memory: str) -> str:
 
 def end_conversation(reason: str) -> str:
     """
-    Call this tool when the user confirms that the primary task (finding the file path) is complete.
-    This signals that the conversation should end.
+    Call this tool **ONLY** after the user has explicitly confirmed that the primary task is complete 
+    and that the conversation should end. Do NOT call this just because you think the task is done;
+    wait for the user's explicit confirmation.
     
     Args:
-        reason (str): A brief explanation why the conversation is ending (e.g., "User confirmed file found.").
+        reason (str): A brief explanation why the conversation is ending (e.g., "User confirmed file found and task complete.").
     
     Returns:
         str: A confirmation message indicating the end signal was received.
