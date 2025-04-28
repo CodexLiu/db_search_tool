@@ -2,11 +2,21 @@ import os
 import tempfile
 import dropbox
 import dropbox.common
+import io
+import logging
 from .dropbox_token_manager import get_access_token
 
-def download_file(path, select_user=None, local_path=None):
+# Set up logging
+logger = logging.getLogger(__name__)
+
+# Constants
+MAX_DOWNLOAD_SIZE = 5 * 1024 * 1024  # 5MB absolute maximum
+PARTIAL_DOWNLOAD_SIZE = 1 * 1024 * 1024  # 1MB for partial downloads
+
+def download_file_with_size_limit(path, select_user=None, local_path=None, max_size_bytes=PARTIAL_DOWNLOAD_SIZE):
     """
-    Downloads a file from Dropbox to a temporary or specified location.
+    Downloads a file from Dropbox with size limit to avoid timeouts on large files.
+    For files larger than MAX_DOWNLOAD_SIZE (5MB), no download is attempted.
     
     Args:
         path (str): The path of the file in Dropbox to download
@@ -14,9 +24,13 @@ def download_file(path, select_user=None, local_path=None):
                                      If None, operates as the admin linked to the token.
         local_path (str, optional): Local path where to save the file.
                                     If None, saves to a temporary file.
+        max_size_bytes (int): Maximum file size to download (default: 1MB)
         
     Returns:
-        str: Path to the downloaded file
+        tuple: (str: Path to the downloaded file or None if too large, 
+                bool: True if file was truncated or too large, 
+                int: Total file size,
+                bool: True if the file was too large to download at all)
         
     Raises:
         dropbox.exceptions.ApiError: If the API request fails.
@@ -29,11 +43,14 @@ def download_file(path, select_user=None, local_path=None):
 
     dbx_team = dropbox.DropboxTeam(access_token)
     member_id_to_use = select_user
+    is_truncated = False
+    total_file_size = 0
+    too_large_to_download = False
 
     try:
         # 1. Determine the Member ID context
         if not member_id_to_use:
-            print("No select_user provided, determining token admin's member ID...")
+            logger.info("No select_user provided, determining token admin's member ID...")
             admin_info = dbx_team.team_token_get_authenticated_admin()
             # Ensure we get the team_member_id, not just the user_id if different
             if hasattr(admin_info.admin_profile, 'team_member_id'):
@@ -41,30 +58,38 @@ def download_file(path, select_user=None, local_path=None):
             else:
                  # Fallback or error, depending on API version/structure
                  raise ValueError("Could not determine team_member_id for the authenticated admin.")
-            # print(f"Operating as admin: {member_id_to_use}")
         else:
-            print(f"Operating as specified user: {member_id_to_use}")
+            logger.info(f"Operating as specified user: {member_id_to_use}")
 
         # 2. Get user-specific context client
         dbx_user_context = dbx_team.as_user(member_id_to_use)
 
         # 3. Get account info to find the root namespace ID
-        # print(f"Fetching account info for {member_id_to_use}...")
         account_info = dbx_user_context.users_get_current_account()
         
         if not hasattr(account_info, 'root_info') or not hasattr(account_info.root_info, 'root_namespace_id'):
              raise ValueError("Could not determine root_namespace_id from user's account info.")
              
         root_namespace_id = account_info.root_info.root_namespace_id
-        # print(f"Using root namespace ID: {root_namespace_id}")
 
         # 4. Create the final client scoped to the correct root and user
         team_path_root = dropbox.common.PathRoot.namespace_id(root_namespace_id)
         # Apply path_root first, then user context for the final client
         dbx_final_client = dbx_team.with_path_root(team_path_root).as_user(member_id_to_use)
-        # print("Final Dropbox client configured.")
 
-        # 5. Prepare local file path
+        # 5. First, get metadata to check file size
+        logger.info(f"Getting metadata for '{path}'...")
+        metadata = dbx_final_client.files_get_metadata(path)
+        total_file_size = metadata.size
+        
+        # Check if file is too large to even attempt download (> 5MB)
+        if total_file_size > MAX_DOWNLOAD_SIZE:
+            logger.warning(f"File size ({total_file_size} bytes) exceeds maximum limit ({MAX_DOWNLOAD_SIZE} bytes). Skipping download.")
+            is_truncated = True
+            too_large_to_download = True
+            return None, is_truncated, total_file_size, too_large_to_download
+            
+        # 6. Prepare local file path
         if local_path is None:
             # Create a temporary file with the same extension as the original
             file_ext = os.path.splitext(path)[1]
@@ -75,12 +100,30 @@ def download_file(path, select_user=None, local_path=None):
             # Ensure the directory exists
             os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
         
-        # 6. Download the file
-        # print(f"Downloading '{path}' to '{local_path}'...")
-        metadata = dbx_final_client.files_download_to_file(local_path, path)
-        # print(f"Download complete: {metadata.name}, size: {metadata.size} bytes")
+        # 7. Download the file (either full or partial)
+        if total_file_size > max_size_bytes:
+            logger.info(f"File size ({total_file_size} bytes) exceeds partial limit ({max_size_bytes} bytes). Downloading partial content...")
+            is_truncated = True
+            
+            # Use files_download instead of files_download_to_file to get content directly
+            result = dbx_final_client.files_download(path)
+            # Get the file content
+            _, response = result
+            
+            # Read only up to max_size_bytes
+            content = response.content[:max_size_bytes]
+            
+            # Write the partial content to the file
+            with open(local_path, 'wb') as f:
+                f.write(content)
+                
+            logger.info(f"Partial download complete: {metadata.name}, downloaded: {len(content)} bytes of {total_file_size} bytes")
+        else:
+            logger.info(f"Downloading entire file ({total_file_size} bytes) to '{local_path}'...")
+            dbx_final_client.files_download_to_file(local_path, path)
+            logger.info(f"Download complete: {metadata.name}, size: {total_file_size} bytes")
         
-        return local_path
+        return local_path, is_truncated, total_file_size, too_large_to_download
 
     except dropbox.exceptions.AuthError as e:
         raise ValueError(f"Authentication error: {e}. Check token validity and scopes.") from e
@@ -94,21 +137,57 @@ def download_file(path, select_user=None, local_path=None):
         else:
              error_summary = str(e)
              
-        print(f"Dropbox API Error Summary: {error_summary}")
+        logger.error(f"Dropbox API Error Summary: {error_summary}")
         
         # Attempt to print more details if available (e.g., for path errors)
         if hasattr(e, 'error') and hasattr(e.error, 'path') and e.error.path:
-             print(f"  Error details related to path lookup: {e.error.path}")
+             logger.error(f"  Error details related to path lookup: {e.error.path}")
              
         # Provide context about the operation
-        print(f"  Error occurred during download for user {member_id_to_use} in namespace {root_namespace_id if 'root_namespace_id' in locals() else 'N/A'} for path '{path}'.")
+        logger.error(f"  Error occurred during download for user {member_id_to_use} in namespace {root_namespace_id if 'root_namespace_id' in locals() else 'N/A'} for path '{path}'.")
         raise # Re-raise the original ApiError
 
     except Exception as e:
         # Catch any other unexpected errors
         import traceback
-        print(f"Unexpected Error: {e}\n{traceback.format_exc()}")
+        logger.error(f"Unexpected Error: {e}\n{traceback.format_exc()}")
         raise RuntimeError(f"An unexpected error occurred: {e}") from e
+
+# Update existing download_file function to use the new size-limited version
+def download_file(path, select_user=None, local_path=None, max_size_bytes=PARTIAL_DOWNLOAD_SIZE):
+    """
+    Downloads a file from Dropbox to a temporary or specified location.
+    Now uses size limiting to prevent timeouts on large files.
+    
+    Args:
+        path (str): The path of the file in Dropbox to download
+        select_user (str, optional): Team member ID (e.g., "dbmid:...") to operate as.
+                                     If None, operates as the admin linked to the token.
+        local_path (str, optional): Local path where to save the file.
+                                    If None, saves to a temporary file.
+        max_size_bytes (int): Maximum file size to download (default: 1MB)
+        
+    Returns:
+        str: Path to the downloaded file
+        
+    Raises:
+        dropbox.exceptions.ApiError: If the API request fails.
+        ValueError: If token is invalid or required info cannot be determined.
+        RuntimeError: For unexpected errors during the process.
+        ValueError: If file is too large to download (>5MB)
+    """
+    local_path, is_truncated, total_size, too_large = download_file_with_size_limit(
+        path, select_user, local_path, max_size_bytes
+    )
+    
+    if too_large:
+        size_mb = total_size / (1024 * 1024)
+        raise ValueError(f"File is too large to download: {size_mb:.1f} MB exceeds the 5 MB limit")
+    
+    if is_truncated:
+        logger.warning(f"File was truncated! Only downloaded {max_size_bytes} bytes of {total_size} bytes.")
+    
+    return local_path
 
 def extract_text(file_path):
     """
@@ -211,7 +290,7 @@ def _extract_text_from_pptx(file_path):
     
     return "\n".join(text)
 
-def download_and_extract_text(path, select_user=None, cleanup=True):
+def download_and_extract_text(path, select_user=None, cleanup=True, max_size_bytes=PARTIAL_DOWNLOAD_SIZE):
     """
     Downloads a file from Dropbox and extracts text from it.
     
@@ -219,26 +298,39 @@ def download_and_extract_text(path, select_user=None, cleanup=True):
         path (str): The path of the file in Dropbox
         select_user (str, optional): Team member ID to operate as
         cleanup (bool): Whether to delete the temporary file after extraction
+        max_size_bytes (int): Maximum file size to download (default: 1MB)
         
     Returns:
-        str: Extracted text content
+        tuple: (str: Extracted text content, bool: Whether the file was truncated, int: Total file size, bool: True if file was too large)
         
     Raises:
         Various exceptions from download_file and extract_text functions
     """
     try:
-        local_path = download_file(path, select_user)
+        # Get metadata first to determine the file size
+        local_path, is_truncated, total_size, too_large = download_file_with_size_limit(path, select_user, None, max_size_bytes)
+        
+        # Handle case when file is too large to download
+        if too_large:
+            size_mb = total_size / (1024 * 1024)
+            error_message = f"This file is too large to process ({size_mb:.1f} MB exceeds the 5 MB limit). Please try a smaller file or a different approach."
+            return error_message, True, total_size, True
+            
+        # Process the downloaded file
         text = extract_text(local_path)
+        
+        if is_truncated:
+            text += f"\n\n[NOTE: This is a partial extraction of the file. Only the first {max_size_bytes/1024/1024:.1f} MB of {total_size/1024/1024:.1f} MB total size was processed due to file size constraints.]"
         
         if cleanup:
             try:
                 os.remove(local_path)
-                print(f"Temporary file deleted: {local_path}")
+                logger.info(f"Temporary file deleted: {local_path}")
             except Exception as e:
-                print(f"Warning: Failed to delete temporary file {local_path}: {e}")
+                logger.warning(f"Failed to delete temporary file {local_path}: {e}")
         
-        return text
+        return text, is_truncated, total_size, too_large
     
     except Exception as e:
-        print(f"Error in download_and_extract_text: {e}")
+        logger.error(f"Error in download_and_extract_text: {e}")
         raise 

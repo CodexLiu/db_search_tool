@@ -1,32 +1,79 @@
-from utils.dropbox_file_manager import download_file
+from utils.dropbox_file_manager import download_file, download_file_with_size_limit, MAX_DOWNLOAD_SIZE, PARTIAL_DOWNLOAD_SIZE
 from utils.dropbox_folder_manager import list_folder_complete
 import os
+import logging
 
-def check_file_contents(dropbox_path: str, select_user=None) -> str:
+# Set up logging
+logger = logging.getLogger(__name__)
+
+def check_file_contents(dropbox_path: str, select_user=None, max_size_bytes=PARTIAL_DOWNLOAD_SIZE) -> str:
     """
     Downloads a file from Dropbox, sends it to the OpenAI API with an appropriate prompt 
     based on file type (especially for Excel), and asks about its content.
     Returns the response from the API.
     Cleans up the downloaded file after use.
+    Files larger than 5MB will not be downloaded.
+    
+    Args:
+        dropbox_path (str): The path of the file in Dropbox
+        select_user (str, optional): Team member ID to operate as
+        max_size_bytes (int): Maximum file size to download (default: 1MB)
+        
+    Returns:
+        str: API response with file content analysis or error message for oversized files
     """
     from utils.openai_api_call import ask_with_base64_file
-    local_path = download_file(dropbox_path, select_user=select_user)
-    prompt = "What is in this file?"
     
-    # Check file extension for Excel files
-    _, file_extension = os.path.splitext(local_path)
-    if file_extension.lower() in ['.xlsx', '.xls']:
-        prompt = "This is an Excel spreadsheet. Please summarize its main content, key data tables, sheet names, or overall purpose."
-        
+    # Use size-limited download to prevent timeouts
     try:
-        response = ask_with_base64_file(local_path, prompt)
-    finally:
+        local_path, is_truncated, total_size, too_large = download_file_with_size_limit(
+            dropbox_path, select_user=select_user, max_size_bytes=max_size_bytes
+        )
+        
+        # Handle case when file is too large to download (>5MB)
+        if too_large:
+            size_mb = total_size / (1024 * 1024)
+            max_size_mb = MAX_DOWNLOAD_SIZE / (1024 * 1024)
+            return f"⚠️ This file is too large to process: {size_mb:.1f} MB exceeds the {max_size_mb:.0f} MB limit. Please try a smaller file or ask for basic metadata about this file instead."
+        
+        prompt = "What is in this file?"
+        
+        # Add information about truncation if needed
+        if is_truncated:
+            truncation_notice = f"NOTE: This file is {total_size/1024/1024:.1f} MB, but only the first {max_size_bytes/1024/1024:.1f} MB were analyzed due to size constraints."
+            prompt = f"{prompt}\n\n{truncation_notice}"
+            logger.warning(truncation_notice)
+        
+        # Check file extension for Excel files
+        _, file_extension = os.path.splitext(local_path)
+        if file_extension.lower() in ['.xlsx', '.xls']:
+            excel_prompt = "This is an Excel spreadsheet. Please summarize its main content, key data tables, sheet names, or overall purpose."
+            prompt = excel_prompt if not is_truncated else f"{excel_prompt}\n\n{truncation_notice}"
+            
         try:
-            os.remove(local_path)
-        except Exception as e:
-            print(f"Error removing temporary file {local_path}: {e}") # Added error logging
-            pass # Continue anyway
-    return response
+            response = ask_with_base64_file(local_path, prompt)
+            
+            # Add truncation notice to response if file was truncated
+            if is_truncated:
+                response += f"\n\n[NOTE: This file is {total_size/1024/1024:.1f} MB in total, but only the first {max_size_bytes/1024/1024:.1f} MB were analyzed due to size constraints.]"
+        finally:
+            try:
+                os.remove(local_path)
+                logger.info(f"Temporary file deleted: {local_path}")
+            except Exception as e:
+                logger.error(f"Error removing temporary file {local_path}: {e}")
+                pass # Continue anyway
+        return response
+    
+    except ValueError as e:
+        # Handle the case where the file is too large
+        if "too large to download" in str(e):
+            return str(e)
+        else:
+            raise
+    except Exception as e:
+        logger.error(f"Error in check_file_contents: {e}")
+        return f"Error processing file: {str(e)}"
 
 def list_folder_contents(dropbox_path: str, select_user=None, **kwargs):
     """

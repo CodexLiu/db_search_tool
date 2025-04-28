@@ -23,12 +23,13 @@ tools = [
         "type": "function",
         "function": {
             "name": "check_file_contents",
-            "description": "Downloads a file from Dropbox and summarizes its content using the OpenAI API. Provides specific summaries for Excel files (.xlsx, .xls).",
+            "description": "Downloads a file from Dropbox and summarizes its content using the OpenAI API. Files larger than 5MB cannot be processed. Provides specific summaries for Excel files (.xlsx, .xls).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "dropbox_path": {"type": "string", "description": "The path to the file in Dropbox."},
-                    "select_user": {"type": ["string", "null"], "description": "Team member ID to operate as. Optional."}
+                    "select_user": {"type": ["string", "null"], "description": "Team member ID to operate as. Optional."},
+                    "max_size_bytes": {"type": "integer", "description": "Maximum file size to download in bytes (default: 1MB). Files over 5MB will not be downloaded at all.", "default": 1048576}
                 },
                 "required": ["dropbox_path"]
             }
