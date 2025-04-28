@@ -2,6 +2,10 @@
 
 This project provides a conversational AI agent capable of searching your Dropbox files based on natural language queries. It can be interacted with directly via the command line or through a Slack bot integration.
 
+## Example Interaction
+
+![Example interaction](images/example_image.png)
+
 ## Features
 
 *   **Natural Language Search:** Describe the file you're looking for, even vaguely, and the agent will try to find it in your Dropbox.
